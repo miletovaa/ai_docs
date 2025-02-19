@@ -1,27 +1,14 @@
 import mysql.connector
 import os
 from dotenv import load_dotenv
+from db.connector import get_db_connection
 
 load_dotenv()
 
-db_port = os.getenv("DB_PORT")
-if not db_port or not db_port.isdigit():
-    db_port = 3306
-else:
-    db_port = int(db_port)
-
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST"),
-    "port": db_port,
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASS"),
-    "database": os.getenv("DB_NAME")
-}
-
-project_prexif = os.getenv("PROJECT_NAME")
+project_prefix = os.getenv("PROJECT_NAME")
 
 CREATE_FILES_TABLE = f"""
-CREATE TABLE `{project_prexif}_files` (
+CREATE TABLE `{project_prefix}_files` (
     id INT AUTO_INCREMENT PRIMARY KEY,
     path TEXT NOT NULL,
     content LONGTEXT NOT NULL,
@@ -30,7 +17,7 @@ CREATE TABLE `{project_prexif}_files` (
 """
 
 CREATE_FILE_BLAME_TABLE = f"""
-CREATE TABLE `{project_prexif}_files_blame` (
+CREATE TABLE `{project_prefix}_files_blame` (
     id INT AUTO_INCREMENT PRIMARY KEY,
     file_id INT NOT NULL,
     path TEXT NOT NULL,
@@ -39,7 +26,7 @@ CREATE TABLE `{project_prexif}_files_blame` (
     commit_hash VARCHAR(40) NOT NULL,
     commit_date DATETIME NOT NULL,
     content TEXT NOT NULL,
-    FOREIGN KEY (file_id) REFERENCES `{project_prexif}_files`(id) ON DELETE CASCADE
+    FOREIGN KEY (file_id) REFERENCES `{project_prefix}_files`(id) ON DELETE CASCADE
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 """
 
@@ -56,20 +43,20 @@ def table_exists(cursor, table_name):
 
 def create_tables():
     try:
-        conn = mysql.connector.connect(**DB_CONFIG)
+        conn = get_db_connection()
         cursor = conn.cursor()
 
-        if not table_exists(cursor, f"{project_prexif}_files"):
-            print(f"🛠️ Creating table: {project_prexif}_files")
+        if not table_exists(cursor, f"{project_prefix}_files"):
+            print(f"🛠️ Creating table: {project_prefix}_files")
             cursor.execute(CREATE_FILES_TABLE)
         else:
-            print(f"✅ Table {project_prexif}_files already exists.")
+            print(f"✅ Table {project_prefix}_files already exists.")
 
-        if not table_exists(cursor, f"{project_prexif}_files_blame"):
-            print(f"🛠️ Creating table: {project_prexif}_files_blame")
+        if not table_exists(cursor, f"{project_prefix}_files_blame"):
+            print(f"🛠️ Creating table: {project_prefix}_files_blame")
             cursor.execute(CREATE_FILE_BLAME_TABLE)
         else:
-            print(f"✅ Table {project_prexif}_files_blame already exists.")
+            print(f"✅ Table {project_prefix}_files_blame already exists.")
 
         if not table_exists(cursor, "github_history"):
             print("🛠️ Creating table: github_history")

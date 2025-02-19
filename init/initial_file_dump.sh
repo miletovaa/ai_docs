@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LOG_FILE="initial_file_dump.log"
+LOG_FILE="logs/initial_file_dump.log"
 echo "🔍 Starting file import: $(date)" > "$LOG_FILE"
 
 if [ -f .env ]; then

@@ -21,3 +21,7 @@ DB_CONFIG = {
 def get_db_connection():
     """Returns a new database connection."""
     return mysql.connector.connect(**DB_CONFIG)
+
+def close_connection(conn):
+    """Closes the database connection."""
+    conn.close()

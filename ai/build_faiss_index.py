@@ -23,22 +23,22 @@ conn = get_db_connection()
 
 index_path = os.path.join(os.path.dirname(__file__), f'{project_prefix}_info.bin')
 
-def text_to_vector(text_en: str):
-    if not text_en.strip():
+def text_to_vector(text: str):
+    if not text.strip():
         return None
     try:
         client = OpenAI()
         embedding = client.embeddings.create(
             model=embedding_model,
-            input=text_en
+            input=text
         ).data[0].embedding
 
-        input_tokens = len(text_en.split())
+        input_tokens = len(text.split())
         cost_per_token = 0.100 / 1000000
         cost = input_tokens * cost_per_token
         logger.info(f"FAISS ada-002. Number of tokens: {input_tokens}, cost: {cost:.6f}$")
 
-        return embedding
+        return {"embedding": embedding, "cost": cost}
     except Exception as e:
         logger.error(f"[OpenAI] Error in embedding: {e}")
         return None
@@ -84,7 +84,7 @@ def build_faiss_index():
 
         text = f"FILE NAME: {filename}. FILE CATEGORY: {file_category}. FILE CONTENT: {file_content}."
 
-        embedding = text_to_vector(text)
+        embedding = text_to_vector(text)["embedding"]
 
         if embedding:
             faiss_vector = np.array(embedding, dtype='float32').reshape(1, -1)

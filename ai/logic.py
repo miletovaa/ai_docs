@@ -23,6 +23,7 @@ from typing import Dict, Any
 import sys
 
 from db.connector import get_db_connection
+from common.setup_logs import setup_logger
 
 
 load_dotenv()
@@ -30,23 +31,16 @@ load_dotenv()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 project_prefix = os.getenv("PROJECT_NAME")
+vector_dimension = int(os.getenv("VECTOR_DIMENSION"))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
 
 
-logging.basicConfig(
-    filename='logs/logic.log',
-    level=logging.INFO,
-    format='%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 executor = ThreadPoolExecutor()
-
 
 sessions: Dict[str, Any] = {}
 
@@ -57,8 +51,6 @@ class InitData(BaseModel):
 global faiss_index
 
 faiss_index = None
-embedding_model = "text-embedding-ada-002"
-vector_dimension = 1536  # Example for the model 'ada-002'
 
 
 print("Python executable:", sys.executable)

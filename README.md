@@ -8,3 +8,8 @@ AI Code Documentation Assistant
 `pip install -r requirements.txt`
 
 `pip freeze > requirements.txt`
+
+`./init.sh`
+`python3 -m init.migrations`
+
+`python3 -m ai.logic`

@@ -1,49 +1,64 @@
-import re
 import os
-from ai.logic import run_pipeline
-from telegram.helpers import escape_markdown
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from dotenv import load_dotenv
 
 from common.setup_logs import setup_logger
+from tg.keyboard import reply_keyboard_markup, QUIT_BUTTON, CHOOSE_MODEL_BUTTON
+from tg.actions import quit_conversation, model_selection, ai_module_response, handle_change_model
+from db.connector import get_db_connection
 
 load_dotenv()
 
+conn = get_db_connection()
 logger = setup_logger()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+project_name = os.getenv("PROJECT_NAME")
 
 async def start(update, context):
-    await update.message.reply_text("👋 Ciao! Send me a question about Syncro project.")
+    telegram_id = update.message.from_user.id
 
-def escape_inside_code_and_pre_tags(text: str) -> str:
-    pattern = re.compile(r"<(code|pre)>(.*?)</\1>", flags=re.DOTALL)
+    query = f"SELECT * FROM users WHERE telegram_id = '{telegram_id}'"
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute(query)
+    record = cursor.fetchone()
+    conn.commit()
+    cursor.close()
 
-    def replacer(match):
-        tag = match.group(1)
-        inner_content = match.group(2)
-        escaped_content = inner_content.replace("<", "&lt;").replace(">", "&gt;")
-        return f"<{tag}>{escaped_content}</{tag}>"
+    if not record:
+        query = f"INSERT INTO users (telegram_id, option_id) VALUES ('{telegram_id}', 1)"
+        cursor = conn.cursor()
+        cursor.execute(query)
+        conn.commit()
+        cursor.close()
 
-    return pattern.sub(replacer, text)
+    await update.message.reply_text(
+        f"👋 Ciao! Send me a question about the {project_name} project.",
+        reply_markup=reply_keyboard_markup
+    )
 
 async def handle_message(update, context):
     user_input = update.message.text
-    await update.message.reply_text("⏳ Processing...")
 
-    try:
-        response = await run_pipeline(user_input)
-        logger.info(f"Response for user: {response}")
+    if user_input.strip() == QUIT_BUTTON:
+        await quit_conversation(update)
+    elif user_input.strip() == CHOOSE_MODEL_BUTTON:
+        await model_selection(update)
+    else:
+        await ai_module_response(update, user_input)
 
-        await update.message.reply_text(escape_inside_code_and_pre_tags(response), parse_mode="HTML")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
+async def button_handler(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    await handle_change_model(query)
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
     print("✅ Bot is running!")
     app.run_polling()

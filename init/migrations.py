@@ -41,6 +41,7 @@ CREATE_APP_OPTIONS_TABLE = f"""
 CREATE TABLE `{project_prefix}_app_options` (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    option_description VARCHAR(255) NULL,
     coefficient FLOAT NOT NULL,
     model_api VARCHAR(255) NOT NULL,
     bot_skills_description LONGTEXT NULL,
@@ -63,6 +64,14 @@ CREATE TABLE `{project_prefix}_app_options` (
 #     FOREIGN KEY (option_id) REFERENCES `{project_prefix}_app_options`(id) ON DELETE CASCADE
 # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 # """
+
+CREATE_USERS_TABLE = f"""
+CREATE TABLE `users` (
+    telegram_id INT PRIMARY KEY,
+    option_id INT NOT NULL,
+    FOREIGN KEY (option_id) REFERENCES `{project_prefix}_app_options`(id) ON DELETE CASCADE
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+"""
 
 def table_exists(cursor, table_name):
     cursor.execute(f"SHOW TABLES LIKE '{table_name}';")
@@ -96,6 +105,12 @@ def create_tables():
             cursor.execute(CREATE_APP_OPTIONS_TABLE)
         else:
             print(f"✅ Table {project_prefix}_app_options already exists.")
+
+        if not table_exists(cursor, "users"):
+            print("🛠️ Creating table: users")
+            cursor.execute(CREATE_USERS_TABLE)
+        else:
+            print("✅ Table users already exists.")
 
         conn.commit()
         cursor.close()

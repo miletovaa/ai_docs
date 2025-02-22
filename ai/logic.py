@@ -1,8 +1,6 @@
-import asyncio
 import os
 import faiss
 import numpy as np
-import json
 from dotenv import load_dotenv
 from typing import Dict, Any
 from pydantic import BaseModel
@@ -15,8 +13,7 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 project_prefix = os.getenv("PROJECT_NAME")
 vector_dimension = int(os.getenv("VECTOR_DIMENSION"))
-
-option = "gpt-4o_no_setting"
+default_option = os.getenv("DEFAULT_APP_OPTION")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROMPTS_FILE = os.path.join(BASE_DIR, "prompts.json")
@@ -36,27 +33,39 @@ def load_faiss_index():
     faiss_index = faiss.read_index(index_path)
     logger.info(f"FAISS индекс загружен из {index_path}")
 
-def get_gpt_model(option="test_settings"):
-    """Получает модель GPT из базы данных"""
+def get_selected_option(telegram_id):
     cursor = conn.cursor(dictionary=True)
 
-    query = f"SELECT model_api FROM {project_prefix}_app_options WHERE name = '{option}'"
+    query = f"SELECT option_id FROM users WHERE telegram_id = '{telegram_id}'"
     cursor.execute(query)
     record = cursor.fetchone()
+    conn.commit()
+    cursor.close()
+
+    return record["option_id"]
+
+def get_gpt_model(option=default_option):
+    cursor = conn.cursor(dictionary=True)
+
+    query = f"SELECT model_api FROM {project_prefix}_app_options WHERE id = '{option}'"
+    cursor.execute(query)
+    record = cursor.fetchone()
+    conn.commit()
     cursor.close()
 
     return record["model_api"]
 
-def get_prompt(keys, option="test_settings"):
+def get_prompt(keys, option=default_option):
     cursor = conn.cursor(dictionary=True)
 
     prompt_type = keys[0]
     role = keys[1]
 
-    query = f"SELECT prompt_{prompt_type}_role_{role} FROM {project_prefix}_app_options WHERE name = '{option}'"
+    query = f"SELECT prompt_{prompt_type}_role_{role} FROM {project_prefix}_app_options WHERE id = '{option}'"
 
     cursor.execute(query)
     record = cursor.fetchone()
+    conn.commit()
     cursor.close()
 
     if record[f"prompt_{prompt_type}_role_{role}"] is None:
@@ -64,14 +73,14 @@ def get_prompt(keys, option="test_settings"):
     else:
         return record[f"prompt_{prompt_type}_role_{role}"]
 
-async def process_user_prompt(prompt):
+async def process_user_prompt(prompt, telegram_id):
     """Запрос в OpenAI для обработки промпта"""
-    gpt_model = get_gpt_model(option)
+    option = get_selected_option(telegram_id)
 
     system_context = get_prompt(["processing", "system"], option)
     assistant_context = get_prompt(["processing", "assistant"], option)
 
-    response = await send_openai_request(prompt, system_context, assistant_context, gpt_model)
+    response = await send_openai_request(prompt, system_context, assistant_context)
 
     if not response:
         logger.error("OpenAI API returned an empty response.")
@@ -124,15 +133,18 @@ async def get_file_content_by_ids(ids):
 
     cursor.execute(query)
     records = cursor.fetchall()
+    conn.commit()
     cursor.close()
     return records
 
-async def get_final_user_response(prompt, files):
+async def get_final_user_response(prompt, telegram_id, files):
     """Генерирует окончательный ответ на основе найденных файлов"""
     if not files:
         return "Извините, не удалось найти релевантные файлы."
 
     files_content_string = " ".join(record["path"] + ": " + record["content"] + "; " for record in files)
+
+    option = get_selected_option(telegram_id)
 
     gpt_model = get_gpt_model(option)
 
@@ -149,22 +161,30 @@ async def get_final_user_response(prompt, files):
 
     return response
 
-async def run_pipeline(user_input):
+async def run_pipeline(user_input, telegram_id):
     """Полный процесс обработки запроса"""
     global faiss_index
 
     if faiss_index is None:
         load_faiss_index()
 
-    processed = await process_user_prompt(user_input)
+    print("Processing user input...")
+
+    processed = await process_user_prompt(user_input, telegram_id)
     prompt = processed["prompt"]
+
+    print("Getting file IDs with FAISS...")
 
     # prompt = user_input
     
     ids_and_distances = await get_file_ids_with_faiss(prompt)
     ids = ids_and_distances.get("ids", [])
 
+    print("Getting file content by IDs...")
+
     files = await get_file_content_by_ids(ids)
-    final_response = await get_final_user_response(prompt, files)
+    final_response = await get_final_user_response(prompt, telegram_id, files)
+
+    print("Final response:", final_response)
 
     return final_response

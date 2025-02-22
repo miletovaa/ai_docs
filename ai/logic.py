@@ -110,7 +110,7 @@ async def get_final_user_response(prompt, files):
     if not files:
         return "Извините, не удалось найти релевантные файлы."
 
-    files_content_string = " ".join(record["content"] for record in files)
+    files_content_string = " ".join(record["path"] + ": " + record["content"] + "; " for record in files)
     system_context = get_prompt(["get_final_user_response", "system_context_settings"])
     assistant_context = get_prompt(["get_final_user_response", "assistent_context_settings"]).format(files_content_string)
 
@@ -127,9 +127,8 @@ async def run_pipeline(user_input):
     if faiss_index is None:
         load_faiss_index()
 
-    # processed = await process_user_prompt(user_input)
-    # prompt = processed["prompt"]
-    prompt = user_input
+    processed = await process_user_prompt(user_input)
+    prompt = processed["prompt"]
     
     ids_and_distances = await get_file_ids_with_faiss(prompt)
     ids = ids_and_distances.get("ids", [])

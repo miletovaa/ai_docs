@@ -37,6 +37,33 @@ CREATE TABLE github_history (
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 """
 
+CREATE_APP_OPTIONS_TABLE = f"""
+CREATE TABLE `{project_prefix}_app_options` (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    coefficient FLOAT NOT NULL,
+    model_api VARCHAR(255) NOT NULL,
+    bot_skills_description LONGTEXT NULL,
+    prompt_processing_role_system LONGTEXT NULL,
+    prompt_processing_role_assistant LONGTEXT NULL,
+    prompt_processing_role_user LONGTEXT NULL,
+    prompt_general_role_system LONGTEXT NULL,
+    prompt_general_role_assistant LONGTEXT NULL,
+    prompt_general_role_user LONGTEXT NULL
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+"""
+
+# CREATE_APP_PROMPTS_TABLE = f"""
+# CREATE TABLE `{project_prefix}_app_prompts` (
+#     id INT AUTO_INCREMENT PRIMARY KEY,
+#     option_id INT NOT NULL,
+#     role ENUM('system', 'user', 'assistant') NOT NULL,
+#     query_type VARCHAR(255) NOT NULL,
+#     prompt TEXT NOT NULL,
+#     FOREIGN KEY (option_id) REFERENCES `{project_prefix}_app_options`(id) ON DELETE CASCADE
+# ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+# """
+
 def table_exists(cursor, table_name):
     cursor.execute(f"SHOW TABLES LIKE '{table_name}';")
     return cursor.fetchone() is not None
@@ -63,6 +90,12 @@ def create_tables():
             cursor.execute(CREATE_HISTORY_TABLE)
         else:
             print("✅ Table github_history already exists.")
+
+        if not table_exists(cursor, f"{project_prefix}_app_options"):
+            print(f"🛠️ Creating table: {project_prefix}_app_options")
+            cursor.execute(CREATE_APP_OPTIONS_TABLE)
+        else:
+            print(f"✅ Table {project_prefix}_app_options already exists.")
 
         conn.commit()
         cursor.close()

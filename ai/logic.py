@@ -16,6 +16,8 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 project_prefix = os.getenv("PROJECT_NAME")
 vector_dimension = int(os.getenv("VECTOR_DIMENSION"))
 
+option = "gpt-4o_no_setting"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROMPTS_FILE = os.path.join(BASE_DIR, "prompts.json")
 
@@ -34,29 +36,49 @@ def load_faiss_index():
     faiss_index = faiss.read_index(index_path)
     logger.info(f"FAISS индекс загружен из {index_path}")
 
-def get_prompt(keys):
-    """Загружает промпты из JSON"""
-    try:
-        with open(PROMPTS_FILE, "r", encoding="utf-8") as f:
-            prompts = json.load(f)
-        data = prompts
-        for key in keys:
-            data = data[key]
-        return data
-    except (KeyError, FileNotFoundError, json.JSONDecodeError):
-        return f"⚠️ Warning: Prompt for {' -> '.join(keys)} not found."
+def get_gpt_model(option="test_settings"):
+    """Получает модель GPT из базы данных"""
+    cursor = conn.cursor(dictionary=True)
+
+    query = f"SELECT model_api FROM {project_prefix}_app_options WHERE name = '{option}'"
+    cursor.execute(query)
+    record = cursor.fetchone()
+    cursor.close()
+
+    return record["model_api"]
+
+def get_prompt(keys, option="test_settings"):
+    cursor = conn.cursor(dictionary=True)
+
+    prompt_type = keys[0]
+    role = keys[1]
+
+    query = f"SELECT prompt_{prompt_type}_role_{role} FROM {project_prefix}_app_options WHERE name = '{option}'"
+
+    cursor.execute(query)
+    record = cursor.fetchone()
+    cursor.close()
+
+    if record[f"prompt_{prompt_type}_role_{role}"] is None:
+        return ""
+    else:
+        return record[f"prompt_{prompt_type}_role_{role}"]
 
 async def process_user_prompt(prompt):
     """Запрос в OpenAI для обработки промпта"""
-    system_context = get_prompt(["process_user_prompt", "system_context_settings"])
-    assistant_context = get_prompt(["process_user_prompt", "assistent_context_settings"])
-    response = await send_openai_request(prompt, system_context, assistant_context)
+    gpt_model = get_gpt_model(option)
+
+    system_context = get_prompt(["processing", "system"], option)
+    assistant_context = get_prompt(["processing", "assistant"], option)
+
+    response = await send_openai_request(prompt, system_context, assistant_context, gpt_model)
 
     if not response:
         logger.error("OpenAI API returned an empty response.")
         return {"prompt": None, "cost": None}
 
     cost = calculate_cost_of_request(response)
+    logger.info("Cost of the request: %.6f$", cost)
     return {"prompt": response, "cost": cost}
 
 async def get_file_ids_with_faiss(prompt):
@@ -111,10 +133,17 @@ async def get_final_user_response(prompt, files):
         return "Извините, не удалось найти релевантные файлы."
 
     files_content_string = " ".join(record["path"] + ": " + record["content"] + "; " for record in files)
-    system_context = get_prompt(["get_final_user_response", "system_context_settings"])
-    assistant_context = get_prompt(["get_final_user_response", "assistent_context_settings"]).format(files_content_string)
 
-    response = await send_openai_request(prompt, system_context, assistant_context)
+    gpt_model = get_gpt_model(option)
+
+    system_context = get_prompt(["general", "system"], option)
+    assistant_context = get_prompt(["general", "assistant"], option).format(files_content_string)
+
+    response = await send_openai_request(prompt, system_context, assistant_context, gpt_model)
+
+    cost = calculate_cost_of_request(response)
+    logger.info("Cost of the request: %.6f$", cost)
+
     if not response:
         return "Ошибка обработки запроса AI."
 
@@ -129,6 +158,8 @@ async def run_pipeline(user_input):
 
     processed = await process_user_prompt(user_input)
     prompt = processed["prompt"]
+
+    # prompt = user_input
     
     ids_and_distances = await get_file_ids_with_faiss(prompt)
     ids = ids_and_distances.get("ids", [])

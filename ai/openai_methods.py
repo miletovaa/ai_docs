@@ -63,10 +63,14 @@ async def send_openai_request(prompt, system_context="", assistant_context="", m
     }
 
     messages = [
-        {"role": "system", "content": system_context},
-        {"role": "assistant", "content": assistant_context},
         {"role": "user", "content": prompt}
     ]
+
+    if system_context is not "":
+        messages.append({"role": "system", "content": system_context})
+
+    if assistant_context is not "":
+        messages.append({"role": "assistant", "content": assistant_context})
 
     data = {
         "model": model,

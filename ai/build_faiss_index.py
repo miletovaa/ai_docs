@@ -3,7 +3,6 @@ import numpy as np
 import openai
 import mysql.connector
 import os
-import logging
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -17,16 +16,17 @@ project_prefix = os.getenv("PROJECT_NAME")
 vector_dimension = int(os.getenv("VECTOR_DIMENSION"))
 embedding_model = os.getenv("EMBEDDING_MODEL")
 
-logger = setup_logger()
-
+logger = setup_logger(__name__)
 conn = get_db_connection()
 
 index_path = os.path.join(os.path.dirname(__file__), f'{project_prefix}_info.bin')
 
 def text_to_vector(text: str):
     if not text.strip():
+        logger.warning("Received empty text for vectorization.")
         return None
     try:
+        logger.info(f"Generating embedding for text: {text[:30]}...")
         client = OpenAI()
         embedding = client.embeddings.create(
             model=embedding_model,
@@ -36,44 +36,44 @@ def text_to_vector(text: str):
         input_tokens = len(text.split())
         cost_per_token = 0.100 / 1000000
         cost = input_tokens * cost_per_token
-        logger.info(f"FAISS ada-002. Number of tokens: {input_tokens}, cost: {cost:.6f}$")
+        logger.info(f"Embedding generated. Tokens: {input_tokens}, Cost: {cost:.6f}$")
 
         return {"embedding": embedding, "cost": cost}
     except Exception as e:
-        logger.error(f"[OpenAI] Error in embedding: {e}")
+        logger.error(f"[OpenAI] Error in embedding: {e}", exc_info=True)
         return None
 
 def build_faiss_index():
-    logger.info("Start Building Faiss index.")
+    logger.info("Starting FAISS index build process.")
 
     try:
         cursor = conn.cursor()
-        logger.info(f"Successful DB connection")
+        logger.info("Connected to the database successfully.")
     except mysql.connector.Error as err:
-        logger.error(f"DB connection error: {err}")
+        logger.error(f"Database connection error: {err}", exc_info=True)
         exit(1)
 
     try:
-        cursor.execute(f"""SELECT * FROM {project_prefix}_files""")
+        cursor.execute(f"SELECT * FROM {project_prefix}_files")
         project_files = cursor.fetchall()
-        logger.info(f"Got {len(project_files)} records from {project_prefix}_files to index.")
+        logger.info(f"Retrieved {len(project_files)} records from {project_prefix}_files for indexing.")
     except mysql.connector.Error as err:
-        logger.error(f"SQL Error: {err}")
+        logger.error(f"SQL query error: {err}", exc_info=True)
         cursor.close()
         conn.close()
         exit(1)
 
     if os.path.exists(index_path):
-        logger.info("Найден существующий Faiss индекс, пытаемся загрузить.")
+        logger.info("Existing FAISS index found, attempting to load.")
         existing_index = faiss.read_index(index_path)
         if not isinstance(existing_index, faiss.IndexIDMap2):
-            logger.info("Индекс не IDMap2, оборачиваем в IndexIDMap2.")
+            logger.info("Index is not IDMap2, wrapping in IndexIDMap2.")
             index = faiss.IndexIDMap2(existing_index)
         else:
             index = existing_index
-        logger.info("Существующий индекс загружен.")
+        logger.info("Existing index loaded successfully.")
     else:
-        logger.info("No FAISS index file. Creating a new one.")
+        logger.info("No FAISS index file found. Creating a new one.")
         index = faiss.IndexIDMap2(faiss.IndexFlatL2(vector_dimension))
 
     for record in project_files:
@@ -84,27 +84,24 @@ def build_faiss_index():
 
         text = f"FILE NAME: {filename}. FILE CATEGORY: {file_category}. FILE CONTENT: {file_content}."
 
-        embedding = text_to_vector(text)["embedding"]
-
+        embedding = text_to_vector(text)
         if embedding:
-            faiss_vector = np.array(embedding, dtype='float32').reshape(1, -1)
+            faiss_vector = np.array(embedding["embedding"], dtype='float32').reshape(1, -1)
             faiss_id = np.array([record_id], dtype='int64')
             index.add_with_ids(faiss_vector, faiss_id)
-            logger.info(f"Добавлен вектор с ID={record_id} в Faiss индекс.")
-            print(f"Added vector with ID={record_id} to Faiss index.")
+            logger.info(f"Added vector with ID={record_id} to FAISS index.")
         else:
-            print(f"Embedding not found for record ID={record_id}, skipping.")
-            logger.warning(f"Эмбеддинг не получен для записи ID={record_id}, пропускаем.")
+            logger.warning(f"Embedding not generated for record ID={record_id}, skipping.")
 
     faiss.write_index(index, index_path)
-    logger.info(f"Faiss индекс успешно сохранён по пути: {index_path}")
+    logger.info(f"FAISS index successfully saved at: {index_path}")
 
     cursor.close()
     conn.close()
-    logger.info("Завершено построение Faiss индекса.")
+    logger.info("FAISS index build process completed.")
 
 if __name__ == "__main__":
     try:
         build_faiss_index()
     except Exception as e:
-        logger.error(f"Unexpectable error: {e}", exc_info=True)
+        logger.error(f"Unexpected error during FAISS index build: {e}", exc_info=True)

@@ -2,8 +2,6 @@ import os
 import faiss
 import numpy as np
 from dotenv import load_dotenv
-from typing import Dict, Any
-from pydantic import BaseModel
 from db.connector import get_db_connection
 from common.setup_logs import setup_logger
 from ai.openai_methods import text_to_vector, send_openai_request, calculate_cost_of_request
@@ -15,23 +13,21 @@ project_prefix = os.getenv("PROJECT_NAME")
 vector_dimension = int(os.getenv("VECTOR_DIMENSION"))
 default_option = os.getenv("DEFAULT_APP_OPTION")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROMPTS_FILE = os.path.join(BASE_DIR, "prompts.json")
-
-logger = setup_logger()
+logger = setup_logger(__name__)
 conn = get_db_connection()
-faiss_index = None  # FAISS инициализируется позже
+faiss_index = None
 
 def load_faiss_index():
-    """Загружает FAISS индекс в память"""
     global faiss_index
     index_path = os.path.join(os.path.dirname(__file__), f'{project_prefix}_info.bin')
 
     if not os.path.exists(index_path):
-        raise FileNotFoundError(f"Файл FAISS индекса не найден: {index_path}")
+        logger.error(f"FAISS index file not found: {index_path}")
+        raise FileNotFoundError(f"FAISS index file not found: {index_path}")
 
+    logger.info(f"Loading FAISS index from {index_path}...")
     faiss_index = faiss.read_index(index_path)
-    logger.info(f"FAISS индекс загружен из {index_path}")
+    logger.info("FAISS index loaded successfully.")
 
 def get_selected_option(telegram_id):
     cursor = conn.cursor(dictionary=True)
@@ -41,6 +37,8 @@ def get_selected_option(telegram_id):
     record = cursor.fetchone()
     conn.commit()
     cursor.close()
+
+    logger.info(f"Selected option for Telegram ID {telegram_id}: {record['option_id']}")
 
     return record["option_id"]
 
@@ -52,6 +50,8 @@ def get_gpt_model(option=default_option):
     record = cursor.fetchone()
     conn.commit()
     cursor.close()
+
+    logger.info(f"Selected GPT model for option {option}: {record['model_api']}")
 
     return record["model_api"]
 
@@ -68,15 +68,17 @@ def get_prompt(keys, option=default_option):
     conn.commit()
     cursor.close()
 
+    logger.info(f"Selected prompt for option {option}: {record[f'prompt_{prompt_type}_role_{role}']}")
+
     if record[f"prompt_{prompt_type}_role_{role}"] is None:
         return ""
     else:
         return record[f"prompt_{prompt_type}_role_{role}"]
 
 async def process_user_prompt(prompt, telegram_id):
-    """Запрос в OpenAI для обработки промпта"""
-    option = get_selected_option(telegram_id)
+    logger.info(f"Processing user prompt for Telegram ID {telegram_id}")
 
+    option = get_selected_option(telegram_id)
     system_context = get_prompt(["processing", "system"], option)
     assistant_context = get_prompt(["processing", "assistant"], option)
 
@@ -87,58 +89,57 @@ async def process_user_prompt(prompt, telegram_id):
         return {"prompt": None, "cost": None}
 
     cost = calculate_cost_of_request(response)
-    logger.info("Cost of the request: %.6f$", cost)
+    logger.info(f"Cost of the request: {cost:.6f}$")
     return {"prompt": response, "cost": cost}
 
 async def get_file_ids_with_faiss(prompt):
-    """Находит ID файлов через FAISS"""
     top_k = 5 # Number of the project files to consider while creating the response
+
+    logger.info("Retrieving file IDs using FAISS search...")
 
     global faiss_index
 
-    dialogue_history_string = ""
+    if faiss_index is None:
+        logger.error("FAISS index is not loaded.")
+        raise ValueError("FAISS index is not loaded.")
 
-    # TODO:
-    # if isinstance(dialogue_history, list) and dialogue_history:
-    #     dialogue_history_string = ' '.join(dialogue_history)
-        
-    if len(dialogue_history_string) > 0:
-        request_to_embed = (
-            f'Question is: "{prompt}"\n, {dialogue_history_string}'
-        )
-    else:
-        request_to_embed = f'Question is: "{prompt}"'
+    request_to_embed = f'Question is: "{prompt}"'
     embedding = text_to_vector(request_to_embed)["embedding"]
 
+    embedding = text_to_vector(prompt)
     if embedding is None:
-        raise ValueError("Ошибка получения эмбеддинга.")
+        logger.error("Failed to generate embedding for FAISS search.")
+        raise ValueError("Failed to generate embedding.")
 
     embedding = np.array(embedding, dtype='float32').reshape(1, -1)
     distances, ids = faiss_index.search(embedding, top_k)
 
+    logger.info(f"FAISS search completed. Found {len(ids[0])} matching file IDs.")
     return {"distances": distances.tolist(), "ids": ids.tolist()}
 
 async def get_file_content_by_ids(ids):
-    """Получает содержимое файлов по их ID"""
     if not ids:
+        logger.info("No relevant files found.")
         return []
 
+    logger.info(f"Fetching content for file IDs: {ids}")
     cursor = conn.cursor(dictionary=True)
-
+    
     if isinstance(ids, list) and len(ids) > 0 and isinstance(ids[0], list):
         ids = ids[0]
 
     in_ids = ', '.join(map(str, ids))
     query = f"SELECT * FROM {project_prefix}_files WHERE id IN ({in_ids})"
-
+    
     cursor.execute(query)
     records = cursor.fetchall()
     conn.commit()
     cursor.close()
+
+    logger.info(f"Retrieved {len(records)} file records from the database.")
     return records
 
 async def get_final_user_response(prompt, telegram_id, files):
-    """Генерирует окончательный ответ на основе найденных файлов"""
     if not files:
         return "Извините, не удалось найти релевантные файлы."
 
@@ -162,29 +163,18 @@ async def get_final_user_response(prompt, telegram_id, files):
     return response
 
 async def run_pipeline(user_input, telegram_id):
-    """Полный процесс обработки запроса"""
-    global faiss_index
+    logger.info(f"Running AI pipeline for Telegram ID {telegram_id}.")
 
     if faiss_index is None:
         load_faiss_index()
 
-    print("Processing user input...")
-
     processed = await process_user_prompt(user_input, telegram_id)
     prompt = processed["prompt"]
 
-    print("Getting file IDs with FAISS...")
-
-    # prompt = user_input
-    
     ids_and_distances = await get_file_ids_with_faiss(prompt)
-    ids = ids_and_distances.get("ids", [])
+    files = await get_file_content_by_ids(ids_and_distances.get("ids", []))
 
-    print("Getting file content by IDs...")
-
-    files = await get_file_content_by_ids(ids)
     final_response = await get_final_user_response(prompt, telegram_id, files)
 
-    print("Final response:", final_response)
-
+    logger.info("AI pipeline completed. Returning response.")
     return final_response
